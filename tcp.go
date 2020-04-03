@@ -78,7 +78,7 @@ func Copy(src, dst *net.TCPConn) error {
 
 func EncodeCopy(src, dst *net.TCPConn) error {
 	rbuf := make([]byte, 1024)
-	wbuf := make([]byte, 1536)
+	encodeBuf := make([]byte, 1536)
 
 	for {
 		rcount, errRead := src.Read(rbuf)
@@ -90,19 +90,34 @@ func EncodeCopy(src, dst *net.TCPConn) error {
 			}
 		}
 
-		blocks := int(math.Ceil(float64(rcount) / 256))
-		for i := 0; i < blocks; i++ {
-			encodeData, encodeErr := RsaEncrypt(rbuf[256*i : 256*(i+1)])
+		encodeBlocks := int(math.Floor(float64(rcount) / 256))
+		var encodeLength int
+		if float64(encodeBlocks) == float64(rcount)/256 {
+			encodeLength = 384 * encodeBlocks
+		} else {
+			encodeLength = 384 * (encodeBlocks + 1)
+		}
+
+		for i := 0; i < encodeBlocks; i++ {
+			encodeData, encodeErr := RsaEncrypt(rbuf[i*256 : (i+1)*256])
 			if encodeErr != nil {
 				return encodeErr
 			}
-			copy(wbuf[384*i:384*(i+1)], encodeData)
+			copy(encodeBuf[i*384:(i+1)*384], encodeData)
 		}
-		wcount, werr := dst.Write(wbuf[:blocks*384])
+		if float64(encodeBlocks) != float64(rcount)/256 {
+			encodeData, encodeErr := RsaEncrypt(rbuf[encodeBlocks*256 : rcount])
+			if encodeErr != nil {
+				return encodeErr
+			}
+			copy(encodeBuf[384*encodeBlocks:384*(encodeBlocks+1)], encodeData)
+		}
+
+		wcount, werr := dst.Write(encodeBuf[:encodeLength])
 		if werr != nil {
 			return werr
 		}
-		if wcount != blocks*384 {
+		if wcount != encodeLength {
 			return io.ErrShortWrite
 		}
 	}
@@ -110,7 +125,7 @@ func EncodeCopy(src, dst *net.TCPConn) error {
 
 func DecodeCopy(src, dst *net.TCPConn) error {
 	rbuf := make([]byte, 1536)
-	wbuf := make([]byte, 1024)
+	decodeBuf := make([]byte, 1024)
 
 	for {
 		rcount, errRead := src.Read(rbuf)
@@ -122,20 +137,28 @@ func DecodeCopy(src, dst *net.TCPConn) error {
 			}
 		}
 
-		blocks := int(math.Ceil(float64(rcount) / 384))
-		for i := 0; i < blocks; i++ {
-			decodeData, decodeErr := RsaDecrypt(rbuf[384*i : 384*(i+1)])
+		decodeBlocks := rcount / 384
+		decodeLength := 0
+		for i := 0; i < decodeBlocks; i++ {
+			decodeData, decodeErr := RsaDecrypt(rbuf[i*384 : (i+1)*384])
+			fmt.Println("decode block length: ", len(decodeData))
 			if decodeErr != nil {
 				return decodeErr
 			}
-			copy(wbuf[i*256:(i+1)*256], decodeData)
+			if len(decodeData) == 256 {
+				decodeLength += 256
+				copy(decodeBuf[i*256:(i+1)*256], decodeData)
+			} else {
+				decodeLength += len(decodeData)
+				copy(decodeBuf[i*256:i*256+len(decodeData)], decodeData)
+			}
 		}
 
-		wcount, werr := dst.Write(wbuf[:blocks*256])
+		wcount, werr := dst.Write(decodeBuf[:decodeLength])
 		if werr != nil {
 			return werr
 		}
-		if wcount != blocks*256 {
+		if wcount != decodeLength {
 			return io.ErrShortWrite
 		}
 	}
