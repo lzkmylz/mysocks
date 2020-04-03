@@ -47,7 +47,6 @@ func handleConn(conn *net.TCPConn) {
 	url := req.URL.Hostname()
 	port, err := strconv.Atoi(req.URL.Port())
 	ipAddr, err := net.ResolveIPAddr("ip", url)
-	fmt.Println("ip: ", ipAddr.String(), ", port: ", port)
 	dIP := ipAddr.IP
 	dstAddr := &net.TCPAddr{
 		IP:   dIP,
@@ -67,12 +66,12 @@ func handleConn(conn *net.TCPConn) {
 	}
 
 	go func() {
-		err := mysocks.Copy(conn, targetConn)
+		err := mysocks.EncodeAndDecodeCopy(conn, targetConn)
 		if err != nil {
 			conn.Close()
 			targetConn.Close()
 			return
 		}
 	}()
-	mysocks.Copy(targetConn, conn)
+	mysocks.EncodeAndDecodeCopy(targetConn, conn)
 }

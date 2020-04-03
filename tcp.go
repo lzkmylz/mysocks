@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -135,6 +136,76 @@ func DecodeCopy(src, dst *net.TCPConn) error {
 			return werr
 		}
 		if wcount != blocks*256 {
+			return io.ErrShortWrite
+		}
+	}
+}
+
+func EncodeAndDecodeCopy(src, dst *net.TCPConn) error {
+	rbuf := make([]byte, 1024)
+	encodeBuf := make([]byte, 1536)
+	decodeBuf := make([]byte, 1024)
+
+	for {
+		rcount, rerr := src.Read(rbuf)
+		if rerr != nil {
+			if rerr != io.EOF {
+				return rerr
+			} else {
+				return nil
+			}
+		}
+
+		encodeBlocks := int(math.Floor(float64(rcount) / 256))
+		var encodeLength int
+		if float64(encodeBlocks) == float64(rcount)/256 {
+			encodeLength = 384 * encodeBlocks
+		} else {
+			encodeLength = 384 * (encodeBlocks + 1)
+		}
+
+		for i := 0; i < encodeBlocks; i++ {
+			encodeData, encodeErr := RsaEncrypt(rbuf[i*256 : (i+1)*256])
+			if encodeErr != nil {
+				return encodeErr
+			}
+			copy(encodeBuf[i*384:(i+1)*384], encodeData)
+		}
+		if float64(encodeBlocks) != float64(rcount)/256 {
+			encodeData, encodeErr := RsaEncrypt(rbuf[encodeBlocks*256 : rcount])
+			if encodeErr != nil {
+				return encodeErr
+			}
+			copy(encodeBuf[384*encodeBlocks:384*(encodeBlocks+1)], encodeData)
+		}
+
+		decodeBlocks := encodeLength / 384
+		decodeLength := 0
+		for i := 0; i < decodeBlocks; i++ {
+			decodeData, decodeErr := RsaDecrypt(encodeBuf[i*384 : (i+1)*384])
+			fmt.Println("decode block length: ", len(decodeData))
+			if decodeErr != nil {
+				return decodeErr
+			}
+			if len(decodeData) == 256 {
+				decodeLength += 256
+				copy(decodeBuf[i*256:(i+1)*256], decodeData)
+			} else {
+				decodeLength += len(decodeData)
+				copy(decodeBuf[i*256:i*256+len(decodeData)], decodeData)
+			}
+		}
+
+		fmt.Println("before encode and decode length: ", rcount)
+		fmt.Println("after encode and decode length: ", decodeLength)
+		fmt.Println("before encode and decode: ", rbuf[:rcount])
+		fmt.Println("after encode and decode: ", decodeBuf[:decodeLength])
+
+		wcount, werr := dst.Write(decodeBuf[:decodeLength])
+		if werr != nil {
+			return werr
+		}
+		if wcount != decodeLength {
 			return io.ErrShortWrite
 		}
 	}
