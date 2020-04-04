@@ -141,7 +141,6 @@ func DecodeCopy(src, dst *net.TCPConn) error {
 		decodeLength := 0
 		for i := 0; i < decodeBlocks; i++ {
 			decodeData, decodeErr := RsaDecrypt(rbuf[i*384 : (i+1)*384])
-			fmt.Println("decode block length: ", len(decodeData))
 			if decodeErr != nil {
 				return decodeErr
 			}
